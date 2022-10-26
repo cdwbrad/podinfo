@@ -8,7 +8,7 @@ backends: []
 
 image:
   repository: ghcr.io/stefanprodan/podinfo
-  tag: 6.1.8
+  tag: 6.2.2
   pullPolicy: IfNotPresent
 
 ui:
@@ -95,6 +95,8 @@ serviceAccount:
   # The name of the service account to use.
   # If not set and create is true, a name is generated using the fullname template
   name:
+  # List of image pull secrets if pulling from private registries
+  imagePullSecrets: []
 
 # set container security context
 securityContext: {}
@@ -138,3 +140,18 @@ tolerations: []
 affinity: {}
 
 podAnnotations: {}
+
+# https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes
+probes:
+  readiness:
+    initialDelaySeconds: 1
+    timeoutSeconds: 5
+    failureThreshold: 3
+    successThreshold: 1
+    periodSeconds: 10
+  liveness:
+    initialDelaySeconds: 1
+    timeoutSeconds: 5
+    failureThreshold: 3
+    successThreshold: 1
+    periodSeconds: 10
