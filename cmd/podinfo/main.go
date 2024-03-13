@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,10 +13,11 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/stefanprodan/podinfo/pkg/api"
-	"github.com/stefanprodan/podinfo/pkg/grpc"
+	"github.com/stefanprodan/podinfo/pkg/api/grpc"
+	"github.com/stefanprodan/podinfo/pkg/api/http"
 	"github.com/stefanprodan/podinfo/pkg/signals"
 	"github.com/stefanprodan/podinfo/pkg/version"
+	go_grpc "google.golang.org/grpc"
 )
 
 func main() {
@@ -33,7 +33,7 @@ func main() {
 	fs.StringSlice("backend-url", []string{}, "backend service URL")
 	fs.Duration("http-client-timeout", 2*time.Minute, "client timeout duration")
 	fs.Duration("http-server-timeout", 30*time.Second, "server read and write timeout duration")
-	fs.Duration("http-server-shutdown-timeout", 5*time.Second, "server graceful shutdown timeout duration")
+	fs.Duration("server-shutdown-timeout", 5*time.Second, "server graceful shutdown timeout duration")
 	fs.String("data-path", "/data", "data local path")
 	fs.String("config-path", "", "config dir path")
 	fs.String("cert-path", "/data/cert", "certificate path for HTTPS port")
@@ -135,13 +135,16 @@ func main() {
 	}
 
 	// start gRPC server
+	var grpcServer *go_grpc.Server
 	if grpcCfg.Port > 0 {
 		grpcSrv, _ := grpc.NewServer(&grpcCfg, logger)
-		go grpcSrv.ListenAndServe()
+		//grpcinfoSrv, _ := grpc.NewInfoServer(&grpcCfg)
+		
+		grpcServer = grpcSrv.ListenAndServe()
 	}
 
 	// load HTTP server config
-	var srvCfg api.Config
+	var srvCfg http.Config
 	if err := viper.Unmarshal(&srvCfg); err != nil {
 		logger.Panic("config unmarshal failed", zap.Error(err))
 	}
@@ -154,9 +157,13 @@ func main() {
 	)
 
 	// start HTTP server
-	srv, _ := api.NewServer(&srvCfg, logger)
+	srv, _ := http.NewServer(&srvCfg, logger)
+	httpServer, httpsServer, healthy, ready := srv.ListenAndServe()
+
+	// graceful shutdown
 	stopCh := signals.SetupSignalHandler()
-	srv.ListenAndServe(stopCh)
+	sd, _ := signals.NewShutdown(srvCfg.ServerShutdownTimeout, logger)
+	sd.Graceful(stopCh, httpServer, httpsServer, grpcServer, healthy, ready)
 }
 
 func initZap(logLevel string) (*zap.Logger, error) {
@@ -238,12 +245,12 @@ func beginStressTest(cpus int, mem int, logger *zap.Logger) {
 			logger.Error("memory stress failed", zap.Error(err))
 		}
 
-		stressMemoryPayload, err = ioutil.ReadFile(path)
+		stressMemoryPayload, err = os.ReadFile(path)
 		f.Close()
 		os.Remove(path)
 		if err != nil {
 			logger.Error("memory stress failed", zap.Error(err))
 		}
-		logger.Info("starting CPU stress", zap.Int("memory", len(stressMemoryPayload)))
+		logger.Info("starting MEMORY stress", zap.Int("memory", len(stressMemoryPayload)))
 	}
 }
